@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Delete resource &apos;WorldLabyrinth/src/org/x68uec/hacku/worldlabyrinth/WorldLabyrinth_debug.java&apos;" deleteContents="false" description="Delete resource &apos;WorldLabyrinth/src/org/x68uec/hacku/worldlabyrinth/WorldLabyrinth_debug.java&apos;" element1="/WorldLabyrinth/src/org/x68uec/hacku/worldlabyrinth/WorldLabyrinth_debug.java" flags="7" id="org.eclipse.ltk.core.refactoring.delete.resources" resources="1" stamp="1404002818406"/>
+</session>

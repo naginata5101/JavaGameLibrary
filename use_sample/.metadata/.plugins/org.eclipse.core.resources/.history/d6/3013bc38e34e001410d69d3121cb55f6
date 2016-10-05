@@ -1,0 +1,1178 @@
+package org.x68uec.hacku.views;
+
+import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.microedition.khronos.opengles.GL10;
+
+import net.azulite.Amanatsu.AmanatsuDraw;
+import net.azulite.Amanatsu.GameColor;
+import net.azulite.Amanatsu.GameView;
+
+import org.x68uec.hacku.event.EventList;
+import org.x68uec.hacku.event.EventManager;
+import org.x68uec.hacku.mapdata.MapData;
+import org.x68uec.hacku.mapdata.MapTextureManager;
+import org.x68uec.hacku.meiqdb.EventData;
+import org.x68uec.hacku.meiqdb.EventType;
+import org.x68uec.hacku.meiqdb.MeiQDB;
+import org.x68uec.hacku.meiqdb.TextureID;
+import org.x68uec.hacku.views.TabMenu.MenuName;
+import org.x68uec.hacku.worldlabyrinth.EventGameView;
+import org.x68uec.hacku.worldlabyrinth.LocationInfo;
+import org.x68uec.hacku.worldlabyrinth.Logger;
+import org.x68uec.hacku.worldlabyrinth.R;
+import org.x68uec.hacku.worldlabyrinth.UpdateThread;
+import org.x68uec.hacku.worldlabyrinth.WorldLabyrinth;
+import org.x68uec.hacku.worldlabyrinth.R.raw;
+import org.x68uec.hacku.worldlabyrinth.Amanatsu_KAI;
+
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
+import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.AlarmManager;
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.opengl.GLException;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
+
+public class MapEvent extends EventGameView {
+	/*
+	 * -----------------------------MapEventクラスのメンバ定数一覧--------------------------
+	 * ---
+	 */
+	// debug
+	final static String debugtag = "MapEvent";
+
+	// 想定している画面の縦方向のセル数
+	final static int VirticalCellNum = 15;
+
+	// 最大倍率
+	final static float maxScaleCount = 4;
+
+	// タッチ検出数の最大数
+	final static int maxTouchNum = 2;
+
+	/*
+	 * -----------------------------MapEventクラスのメンバ変数一覧--------------------------
+	 * ---
+	 */
+
+	static Handler handler = null;
+
+	// データベースクラス
+	protected static MeiQDB db = null;
+	// 更新スレッド
+	protected static UpdateThread updateThread = null;
+	// イベント管理クラス
+	protected static EventManager eventManager = null;
+	// タブマネージャ
+	protected static TabMenu tabMenu = null;
+
+	// マップテクスチャ管理クラス
+	protected static MapTextureManager mapManager = null;
+	protected ArrayList<MapTextureManager.TextureData> nowMaps = null;
+
+	// 各オブジェクトの初期化が完了しているかのフラグ
+	private static boolean initialized = false;
+
+	// 縦方向の（想定）解像度: WindowHeight = VirticalCellNum * 64
+	public static int windowHeight = 960;
+
+	// 横方向のセルの数
+	private static int widthCellNum;
+	
+	// マップ・セルに関する値の取得
+	static int mapWidth = 8;
+	static int mapHeight = 8;
+	static int cellSize = 64;
+
+	// 前回の更新でのテクスチャ座標
+	// 最初にアップデートするように適当な値を設定
+	private int[] lastPos = { -1, -1 };
+
+	// 画面の拡大倍率(端末の画面サイズによって変動)
+	private static float drawScale;
+	// 最小倍率時でのセルの大きさ
+	protected static int cellPixelSize;
+
+	// 地図の拡大倍率
+	protected float mapDrawScale;
+	// 現在の画面内でのセルの大きさ
+	protected static int nowCellPixelSize;
+	float scaleCount = 0;
+	// 中心踏破セルの描画位置（左上座標）
+	protected static int centerCellDestX;
+	protected static int centerCellDestY;
+
+	// 中心セルに関する値
+	// 中心セルを現在座標に追従させるかのフラグ
+	private boolean centerNowLocate = true;
+	// 表示中心セル座標
+	static private int[] centerCell = { -1, -1 };
+	// 現在の表示中心セル座標（centerCellに徐々に補正される）
+	static private double[] viewCenterCell = { -1, -1 };
+	// 現在の GPS 座標
+	private int[] gpsCell = { -1, -1 };
+	// 現在のGPS位置
+	private double[] gps = {-1, -1};
+
+	private boolean captured = false;
+	
+	// スクロール関連
+	boolean isScroll = false;
+	double[] scrollMount = { 0.0, 0.0 };
+	double[] beginningTouchPos = { -1, -1 };
+
+	// タッチに関する値
+	// マルチタッチ処理をする最大数は maxTouchNum とする（そんな何本も処理する必要がない）
+	// 解像度毎にタッチ座標が変わってしまうので、タッチ座標は予め実数値に変換しておく。
+	int touchNum = 0;
+	double[][] lastTouchPos = { { -1, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 },
+			{ -1, -1 } };
+	double[][] nowTouchPos = { { -1, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 },
+			{ -1, -1 } };
+
+	// 次に再生するイベント
+	int replayEvent, replayEventType;
+	int[] pinPos = { -1, -1 };
+	// ピン立て用のログリスト
+	long lastEventNum = 0;
+	List<EventData> logList;
+	Map<Integer, EventPin> pins;
+
+	// 次のシーン
+	private GameView nextScene = null;
+	
+	/*
+	 * -----------------------------MapEventクラスのインナークラス一覧------------------------
+	 * ---- -
+	 */
+
+	// 仕様：同じマスのイベントは後のものが優先される。
+	class EventPin {
+		int x, y;
+		int eid = -1;
+
+		// 横幅は nowCellPixelSize
+
+		EventPin(int cellx, int celly, int eventid) {
+			x = cellx;
+			y = celly;
+			eid = eventid;
+		}
+
+		public boolean isTouchPin(int tx, int ty) {
+			// セルの横幅 + セル上部から上下にセル半分だけの範囲を検出
+			float dx = centerCellDestX
+					+ (float) (((double) x - viewCenterCell[1]) * nowCellPixelSize);
+			float dy = centerCellDestY
+					+ (float) (((double) y - viewCenterCell[0]) * nowCellPixelSize);
+
+			return tx >= dx && tx < dx + nowCellPixelSize
+					&& ty >= dy - nowCellPixelSize / 2
+					&& ty < dy + nowCellPixelSize / 2;
+		}
+
+		public int getX() {
+			return x;
+		}
+
+		public int getY() {
+			return y;
+		}
+
+		public int getID() {
+			return eid;
+		}
+
+		public void setID(int eventid) {
+			eid = eventid;
+		}
+	}
+
+	// debug
+	// 発生させるイベント
+	int eventType = 1;
+
+	/*
+	 * -----------------------------MapEventクラスのメソッド一覧----------------------------
+	 * -
+	 */
+
+	// / コンストラクタ
+	// 他のビューからの遷移で呼ばれる方
+	public MapEvent() {
+		db = MeiQDB.self();
+	}
+
+	// アクティビティで最初に呼ばれる方
+	public MapEvent(
+			UpdateThread ut,
+			EventManager em,
+			MapTextureManager mtm) {
+		db = MeiQDB.self();
+
+		updateThread = ut;
+		eventManager = em;
+		mapManager = mtm;
+
+		handler = new Handler();
+	}
+
+	// GameViewクラスの設定用関数
+	@Override
+	public void UserInit() {
+		// TODO あとで消す
+		// テスト用GPS(調布市調布ケ丘): 35.654778, 139.546498
+
+		try {
+			if (!initialized)
+				initializeSystem();
+
+			updateThread.updateEnterFlag(mapManager);
+			updateThread.setUpdateMap(true, mapManager);
+
+			gpsCell = updateThread.getNowCenterCellPos();
+			lastPos[0] = gpsCell[0];
+			lastPos[1] = gpsCell[1];
+			centerNowLocate = true;
+			
+			LocationInfo info = updateThread.getLocationInfo();
+			gps[0] = info.getLatitude();
+			gps[1] = info.getLongitude();
+
+			nowMaps = mapManager.getLocateMapList(
+					new int[] { (int) centerCell[0], (int) centerCell[1] },
+					MapEvent.VirticalCellNum, widthCellNum);
+
+			scaleCount = 0;
+			setMapDrawScale();
+
+			pinPos[1] = -1;
+			pinPos[0] = -1;
+
+			replayEvent = -1;
+			replayEventType = -1;
+
+			logList = new ArrayList<EventData>();
+			lastEventNum = db.getEventMax();
+			pins = new HashMap<Integer, EventPin>();
+			if (lastEventNum > 0) {
+				logList.addAll(0, Arrays.asList(db.getLatest(10)));
+
+				Logger.logDebug(debugtag, "key size = " + logList.size());
+				for (EventData log : logList) {
+					int key = log.getMapID();
+					Logger.logDebug(debugtag, "key = " + key);
+					Logger.logDebug(debugtag, "MapX = " + log.getMapX()
+							+ ", MapY = " + log.getMapY());
+					if (pins.containsKey(key)) {
+						// 確実に後に見つかったものの方が古いのスキップ
+					} else
+						pins.put(key, new EventPin(log.getMapX(),
+								log.getMapY(), log.getEventID()));
+				}
+			}
+
+			// / リソース再設定
+			// その他マップ上のイベント用の画像を取得
+			/*draw.createTexture(TextureID.CHARA.getTexid(), "chara.png");
+			draw.createTexture(TextureID.WEAPON.getTexid(), "weapon.png");
+			draw.createTexture(TextureID.ENEMY.getTexid(), "enemy.png");
+			draw.createTexture(TextureID.SOZAI.getTexid(), "sozai.png");
+			draw.createTexture(TextureID.UI.getTexid(), "UI.png");
+			draw.createTexture(TextureID.YJDN.getTexid(), "yjdn_attbtn1_250_34.gif");
+			draw.createTexture(TextureID.TAB1.getTexid(), "tab1.png");
+			draw.createTexture(TextureID.TAB2.getTexid(), "tab2.png");
+			draw.createTexture(TextureID.TAB3.getTexid(), "tab3.png");
+			draw.createTexture(TextureID.ACHIEVE.getTexid(), "achievement.png");
+			draw.createTexture(TextureID.BACKGROUND_EVENT.getTexid(), "background.png");
+			draw.createTexture(TextureID.TEX1.getTexid(), "tex1.png");*/
+
+			draw.createFont(10, 10);
+			draw.createFont(10, "misaki_gothic.ttf", (int) (32 * drawScale),
+					true, 1.0f, 1.0f, 1.0f, 1.0f);
+			draw.createFont(11, 11);
+			draw.createFont(11, "misaki_gothic.ttf", (int) (48 * drawScale),
+					true, 1.0f, 1.0f, 1.0f, 1.0f);
+
+			// debug
+			{
+				Logger.logDebug(debugtag, "drawScale = " + drawScale);
+				Logger.logDebug(debugtag, "mapDrawScale = " + mapDrawScale);
+				Logger.logDebug(debugtag, "WidthCellNum = " + widthCellNum);
+
+				draw.createFont(1000, (int) (32 * drawScale));
+			}
+		} catch (Exception e) {
+			Logger.logError(debugtag + " Init", null, e);
+			WorldLabyrinth.exitApplication();
+		}
+
+	}
+
+	static private void initializeSystem() {
+		// こんなところで呼んでいいのか...
+		Looper.prepare();
+
+		// 計算用に MapData のインスタンスを作成
+		MapData map = new MapData();
+
+		// マップ・セルに関する値の取得
+		mapWidth = map.getWidth();
+		mapHeight = map.getHeight();
+
+		// マップ画面の基準は縦の長さ
+		// 縦に15個の踏破セルが表示できるようにする
+		cellSize = map.getCellSize();
+		windowHeight = cellSize * VirticalCellNum;
+		drawScale = calcDrawScale(cellSize, VirticalCellNum);
+		cellPixelSize = (int) (cellSize * drawScale);
+
+		widthCellNum = (int) (draw.getWidth() / cellPixelSize);
+
+		// タブメニューを生成
+		tabMenu = new TabMenu(draw.getWidth(), draw.getHeight(), drawScale,
+				draw);
+
+		// 音声ファイルを読み込んでおく
+		int soundNum = 8;
+		int[] bufID = { 1, 2, 3, 11, 12, 13, 14, 15 };
+		String[] soundFilename = { "select.wav", "cancel.wav", "click.wav",
+				"slash.wav", "assault.wav", "fanfare.wav", "up.wav",
+				"faild.wav" };
+
+		int[] ids = { R.raw.select, R.raw.cancel, R.raw.click, R.raw.slash,
+				R.raw.assault, R.raw.fanfare, R.raw.up, R.raw.faild, };
+
+		for (int i = 0; i < soundNum; ++i) {
+			if (sound.loadBgm(ids[i], false))
+				Logger.logDebug(debugtag, String.format(
+						"success to load sound [%d] '%s'", bufID[i],
+						soundFilename[i]));
+			else
+				Logger.logError(debugtag, String.format(
+						"faild to load sound [%d] '%s'", bufID[i],
+						soundFilename[i]));
+		}
+
+		initialized = true;
+	}
+
+	// メインループ
+	@Override
+	public boolean MainLoop() {
+		boolean scaling = false;
+
+		// / 実行処理
+		try {
+			gpsCell = updateThread.getNowCenterCellPos();
+
+			updateTouchValue();
+
+			// タッチ処理
+			{
+				// タッチかどうか（このフレームで初めて触ったかどうか）のフラグ
+				boolean touch = isTouch();
+
+				// 上のレイヤーから順に行い、排他的に行えるようにする。
+				// 但しスクロール中はそっちを優先する
+				if (!isScroll) {
+					// 拡大縮小
+					if (touchNum == 2) {
+						scaling = checkScale();
+					}
+					// メニュー処理
+					else if (tabMenu.CheckProcess(this,
+							(int) nowTouchPos[0][0], (int) nowTouchPos[0][1],
+							(int) lastTouchPos[0][0], (int) lastTouchPos[0][1])) {
+						if (replayEvent != -1) {
+							EventList e = eventManager.replayEvent(replayEvent);
+							if (e != null)
+								system.setGameView(new BackGameView(e));
+						} else if(replayEventType != -1){
+							EventList e = eventManager.replayAchievement(replayEventType);
+							if (e != null)
+								system.setGameView(new BackGameView(e));
+						} else {
+						}
+					}
+
+					// TODO debug イベント発生ボタンまわり
+					else if (touch && checkTouchSpaceAbs(400, 100, 200, 90)) {
+						// 発生
+						if (EventType.getType(eventType) == null)
+							Log.d(debugtag, "null");
+						eventManager.setEvent(EventType.getType(eventType),
+								gps[0], gps[0], false);
+						sound.playBgm(R.raw.select);
+					} else if (checkTouchSpaceAbs(400, 200, 100, 90)) {
+						// 減らす
+						if (--eventType < 1)
+							eventType = EventType.size() - 1;
+						sound.playBgm(R.raw.click);
+					} else if (checkTouchSpaceAbs(510, 200, 100, 90)) {
+						// 増やす
+						if (++eventType >= EventType.size())
+							eventType = 1;
+						sound.playBgm(R.raw.click);
+					}
+
+					// 現在位置に戻る処理
+					else if (checkTouchSpace((int) (100 * drawScale),
+							(int) (draw.getHeight() - 128 * drawScale),
+							(int) (416 * drawScale), (int) (64 * drawScale))) {
+						if (!centerNowLocate) {
+							centerNowLocate = true;
+							viewCenterCell[0] = centerCell[0] = gpsCell[0];
+							viewCenterCell[1] = centerCell[1] = gpsCell[1];
+
+							WorldLabyrinth.self().makeToast("現在位置に戻りました", true);
+							
+							if (touch)
+								sound.playBgm(R.raw.select);
+						}
+					}
+
+					// それ以外
+					else {
+						// イベントピンチェック
+						if (touch && !tabMenu.isOpenMenu())
+							for (EventPin pin : pins.values()) {
+								if (pin.isTouchPin((int) nowTouchPos[0][0],
+										(int) nowTouchPos[0][1])) {
+									// イベント選択
+									tabMenu.getEventTab()
+											.setSelect(pin.getID());
+									tabMenu.openMenu(this, MenuName.EventLog);
+									sound.playBgm(R.raw.select);
+									break;
+								}
+							}
+
+						scroll();
+					}
+				}
+				// スクロール中なのでスクロール処理優先
+				else {
+					scroll();
+
+					if (touch)
+						sound.playBgm(R.raw.click);
+				}
+			}
+
+			// 表示位置を調整
+			{
+				viewCenterCell[0] = (Math
+						.abs(centerCell[0] - viewCenterCell[0]) > 0.015) ? viewCenterCell[0]
+						+ ((double) centerCell[0] - viewCenterCell[0]) / 3
+						: centerCell[0];
+				viewCenterCell[1] = (Math
+						.abs(centerCell[1] - viewCenterCell[1]) > 0.015) ? viewCenterCell[1]
+						+ ((double) centerCell[1] - viewCenterCell[1]) / 3
+						: centerCell[1];
+			}
+
+			// 表示マップテクスチャ更新
+			if (centerCell[1] != lastPos[1] || centerCell[0] != lastPos[0]) {
+				nowMaps = mapManager.getLocateMapList(
+						new int[] { (int) centerCell[0], (int) centerCell[1] },
+						MapEvent.VirticalCellNum, widthCellNum);
+			}
+
+			long eventNum = db.getEventMax();
+			if (eventNum > lastEventNum) {
+				int n = (int) (eventNum - lastEventNum);
+				Log.d(debugtag, "n = " + n);
+				EventData[] list = db.getLatest(n);
+				for (EventData log : list) {
+					int key = log.getMapID();
+					Logger.logDebug(debugtag, "key = " + key);
+					if (pins.containsKey(key))
+						pins.get(key).setID(log.getEventID());
+					else
+						pins.put(key, new EventPin(log.getMapX(),
+								log.getMapY(), log.getEventID()));
+				}
+				logList.addAll(Arrays.asList(list));
+				lastEventNum = eventNum;
+				// イベントが増えたので効果音を鳴らす
+				sound.playBgm(R.raw.select);
+			}
+		} catch (Exception e) {
+			Logger.logError(debugtag + " Process", null, e);
+			WorldLabyrinth.exitApplication();
+		}
+
+		// / 描画処理
+		try {
+			// スクリーンを初期化
+			draw.clearScreen();
+
+			// 背景描画
+			drawBackground();
+
+			// マップリストを表示
+			if (nowMaps != null)
+				for (MapTextureManager.TextureData tex : nowMaps) {
+					if (tex.getMapData() != null) {
+						// テクスチャをセットする必要があるかチェック
+						// OpenGL の仕様で、特定のスレッドでテクスチャをセットしなければならないため
+						// ここでチェックを行う。
+						if (tex.isIncomleteStruct()) {
+							// pass
+						}
+						else if(tex.isPrevSetTex())
+							tex.setTexture(draw);
+
+						// 描画
+						drawMapNowLocate(
+								tex.getMapData(), tex.getTexBuffer(),
+								viewCenterCell[0], viewCenterCell[1]);
+					}
+				}
+
+			// 必要があれば画面をキャプチャ
+			if (replayEvent != -1 || replayEventType != -1){
+				captured = captureViewSurface();
+			}
+				
+			// 画面中央を四角で囲む
+			draw.drawTextureScalingC(TextureID.UI.getTexid(), 0, 176, 128, 128,
+					draw.getWidth() / 2 + 4, draw.getHeight() / 2 + 4,
+					mapDrawScale);
+
+			// 家を描画
+			if (db.getHomeX() != -1)
+				drawHome(db.getHomeY(), db.getHomeX(), viewCenterCell[0],
+						viewCenterCell[1]);
+
+			// 現在位置を描画
+			drawPosition(gpsCell[0], gpsCell[1], viewCenterCell[0],
+					viewCenterCell[1]);
+
+			// ピンを描画（主にイベント位置のはず）
+			for (EventData data : logList) {
+				drawPin(data.getMapY(), data.getMapX(), viewCenterCell[0],
+						viewCenterCell[1]);
+			}
+			if (pinPos[0] != -1 && pinPos[1] != -1) {
+				drawPin(pinPos[0], pinPos[1], viewCenterCell[0],
+						viewCenterCell[1]);
+			}
+
+			// 現在位置に戻るボタン表示
+			if (centerNowLocate)
+				draw.drawTextureScaling(TextureID.UI.getTexid(), 0, 112, 416, 64, 100 * drawScale,
+						draw.getHeight() - 128 * drawScale, drawScale);
+			else
+				draw.drawTextureScaling(TextureID.UI.getTexid(), 0, 48, 416, 64, 100 * drawScale,
+						draw.getHeight() - 128 * drawScale, drawScale);
+
+			// ネットワーク未接続表示
+			if(!isConnected()) {
+				draw.printf(11, draw.getWidth() /8*3, draw.getHeight() - 192
+						* drawScale, "!!ネットワーク未接続!!");				
+			}
+			// ローディング表示
+			else if (mapManager.getRequestNum() > 0) {
+				String loadingString = new String("NowLoading");
+				for (int i = 0; i < mapManager.getRequestNum(); ++i)
+					loadingString += ".";
+				draw.printf(11, draw.getWidth() /8*3, draw.getHeight() - 192
+						* drawScale, loadingString);
+			}
+			
+			// スケーリング表示
+			if (scaling)
+				draw.printf(11, draw.getWidth() / 2, draw.getHeight() - 256
+						* drawScale, String.format("%d.%02d",
+						(int) scaleCount + 1, (int) (scaleCount * 100) % 100));
+
+			// 現在位置座標の描画
+			draw.drawBox(0, 0, draw.getWidth(), 32 * drawScale,
+					GameColor.createColor(1.0f, 1.0f, 1.0f, 0.2f));
+			draw.printf(10, 0, 0, String.format("きみのしょ　＊ いど=%.3f, けいど=%.3f",
+					gps[1], gps[0]));
+
+			// debug
+			// イベント発生ボタン群
+			drawButton(400, 100, 200, 90, GameColor.RED, eventType + "番イベント発生 ");
+			drawButton(400, 200, 90, 90, GameColor.BLUE, "<");
+			drawButton(510, 200, 90, 90, GameColor.BLUE, ">");
+
+			// メニューを表示
+			tabMenu.Draw(draw, 0, 0);
+		} catch (Exception e) {
+			Logger.logError(debugtag + " Draw", null, e);
+			WorldLabyrinth.exitApplication();
+		}
+
+		// Debug Print
+		/*
+		 * try { int marginX = (int) (40 * drawScale), marginY = (int) (32 *
+		 * drawScale);
+		 * 
+		 * int drawY = marginY;
+		 * 
+		 * draw.printf(1000, marginX, drawY += marginY, "MapList Num = " +
+		 * nowMaps.size());
+		 * 
+		 * // draw.printf(1000, marginX, drawY += marginY, "Travel Time: " + //
+		 * db.getTravelTime((int)viewCenterCell[1], // (int)viewCenterCell[0]));
+		 * 
+		 * // draw.printf(1000, marginX, drawY += marginY, "Maps: " + //
+		 * nowMaps.size());
+		 * 
+		 * // draw.printf(1000, marginX, drawY += marginY, //
+		 * "Now Touch Position: (" + // nowTouchPos[0][0] + ", " +
+		 * nowTouchPos[0][1] + ")"); // draw.printf(1000, marginX, drawY +=
+		 * marginY, // "begin Touch Position: (" // + // beginningTouchPos[0] +
+		 * ", " + beginningTouchPos[1] + ")"); // draw.printf(1000, marginX,
+		 * drawY += marginY, "Scroll Mount: (" + // scrollMount[0] // + ", " +
+		 * scrollMount[1] + ")");
+		 * 
+		 * draw.printf(1000, marginX, drawY += marginY, "MapData Num = " +
+		 * mapManager.getMapDataNum()); draw.printf(1000, marginX, drawY +=
+		 * marginY, "Request Num = " + mapManager.getRequestNum()); } catch
+		 * (Exception e) { Logger.logError(debugtag + " Debug", null, e);
+		 * WorldLabyrinth.exitApplication(); }
+		 */
+
+		if(nextScene != null && captured) {
+			nextGameView(nextScene);
+			nextScene = null;
+			captured = false;
+		}
+		
+		((Amanatsu_KAI)system).checkQuitManner();
+		
+		return true;
+	}
+
+	// 別のビューに移るときの処理
+	@Override
+	public void CleanUp() {
+		// Cleanup game.
+		updateThread.setUpdateMap(false, null);
+	}
+
+	@Override
+	public boolean onBackPressed() {
+		// タブメニューが開かれていたら閉じる
+		if (tabMenu != null && tabMenu.isOpenMenu()) {
+			tabMenu.closeMenu(this);
+		}
+		// タブが閉じていればタイトルに戻る
+		else {
+			returnTitle();
+		}
+		return false;
+	}
+
+	@Override
+	public boolean onMenuPressed() {
+		if (tabMenu == null)
+			return false;
+
+		// タブメニューが開かれていたら閉じる
+		if (tabMenu.isOpenMenu()) {
+			tabMenu.closeMenu(this);
+		}
+		// 何もタブを開いていない時はイベントログを開く
+		else {
+			tabMenu.openMenu(this, MenuName.EventLog);
+		}
+		return false;
+	}
+
+	/**
+	 * 端末毎にdrawScaleの倍率を変更するための関数 黒い画面出したくなかったから倍率(≒画像描画時のサイズ)を固定したかったの。
+	 * 
+	 * @return
+	 */
+	private static float calcDrawScale() {
+		return (float) draw.getHeight() / (windowHeight);
+	}
+
+	private static float calcDrawScale(int cellSize, int cellNum) {
+		return (float) draw.getHeight() / (cellSize * cellNum);
+	}
+
+	private static float calcDrawScale(int cellSize, int cellNum, float count) {
+		return (float) draw.getHeight() / (cellSize * (cellNum - count * 2));
+	}
+
+	public boolean checkInDisplay(int x, int y) {
+		return x >= 0 && x < draw.getWidth() && y >= 0 && y < draw.getHeight();
+	}
+
+	public boolean checkInDisplay(float x, float y) {
+		return x >= 0 && x < draw.getWidth() && y >= 0 && y < draw.getHeight();
+	}
+
+	public boolean checkInDisplay(double x, double y) {
+		return x >= 0 && x < draw.getWidth() && y >= 0 && y < draw.getHeight();
+	}
+
+	// 家の座標をデータベースに登録する
+	public void setHome() {
+		// LocationInfo info = updateThread.getLocationInfo();
+		// db.setHome(	gpsCell[1], gpsCell[0],
+		//			info.getLatitude(), info.getLongitude());
+		db.setHome(	gpsCell[1], gpsCell[0],
+					gps[0], gps[1]);
+	}
+	
+	public boolean nowPosIsHome() {
+		return db.getHomeX() == gpsCell[1] && db.getHomeY() == gpsCell[0];
+	}
+
+	boolean checkTouchSpace(int left, int top, int width, int height) {
+		if (input.fingerNum() == 0)
+			return false;
+
+		// １本目を見る
+		float ix = (float) nowTouchPos[0][0];
+		float iy = (float) nowTouchPos[0][1];
+
+		return ix >= left && ix < (left + width) && iy >= top
+				&& iy < (top + height);
+	}
+
+	boolean checkTouchSpaceAbs(int left, int top, int width, int height) {
+		if (input.fingerNum() == 0)
+			return false;
+
+		return checkTouchSpace((int) (left * drawScale),
+				(int) (top * drawScale), (int) (width * drawScale),
+				(int) (height * drawScale));
+	}
+
+	// / 描画系 ////////////////////////////////////////////////////////
+	// 中央位置に丸を描画する
+	public void drawPosition(int cellLat, int cellLon, double centerLat,
+			double centerLon) {
+		// どれだけずらすか計算
+		float x = centerCellDestX + nowCellPixelSize / 2
+				+ (float) (((double) cellLon - centerLon) * nowCellPixelSize);
+		float y = centerCellDestY + nowCellPixelSize / 2
+				+ (float) (((double) cellLat - centerLat) * nowCellPixelSize);
+
+		if (checkInDisplay(x, y))
+			draw.drawTextureScalingC(TextureID.SOZAI.getTexid(), 0, 0, 18, 18, x, y,
+					64 / 18 * mapDrawScale);
+	}
+
+	// 指定の座標に家を描画する
+	public void drawHome(int cellLat, int cellLon, double centerLat,
+			double centerLon) {
+		// どれだけずらすか計算
+		float x = centerCellDestX + nowCellPixelSize / 2
+				+ (float) (((double) cellLon - centerLon) * nowCellPixelSize);
+		float y = centerCellDestY + nowCellPixelSize / 2
+				+ (float) (((double) cellLat - centerLat) * nowCellPixelSize);
+
+		if (checkInDisplay(x, y))
+			draw.drawTextureScalingC(TextureID.SOZAI.getTexid(), 18, 0, 18, 18, x, y,
+					64 / 18 * mapDrawScale);
+	}
+
+	// 指定の座標にピンを表示する
+	public void drawPin(int cellLat, int cellLon, double centerLat,
+			double centerLon) {
+		// どれだけずらすか計算
+		// 中央位置描画なので X → セル半分ずらす, Y → そのまま（上のラインに中央をあわせる)
+		float x = centerCellDestX + nowCellPixelSize / 2
+				+ (float) (((double) cellLon - centerLon) * nowCellPixelSize);
+		float y = centerCellDestY
+				+ (float) (((double) cellLat - centerLat) * nowCellPixelSize);
+
+		if (checkInDisplay(x, y))
+			draw.drawTextureScalingC(TextureID.SOZAI.getTexid(), 0, 24, 16, 32, x, y,
+					64 / 18 * mapDrawScale);
+	}
+
+	void drawButton(int left, int top, int width, int height, float[] color,
+			String str) {
+		draw.drawBox(left * drawScale, top * drawScale, width * drawScale,
+				height * drawScale, color);
+		draw.printf(10, (left + 10) * drawScale, (top + 10) * drawScale, str);
+	}
+
+	void drawBackground() {
+		if (draw.getHeight() > 1024)
+			draw.drawTextureScaling(TextureID.BACKGROUND_EVENT.getTexid(), 0, 0, 1024, 1024, 0, 0,
+					draw.getHeight() / 1024.0f);
+		else if (draw.getWidth() > 1024)
+			draw.drawTextureScaling(TextureID.BACKGROUND_EVENT.getTexid(), 0, 0, 1024, 1024, 0, 0,
+					draw.getWidth() / 1024.0f);
+		else {
+			int size = Math.min(draw.getWidth(), draw.getHeight());
+			int dy = Math.max(0, (draw.getHeight() - size) / 2);
+			draw.drawTextureScaling(TextureID.BACKGROUND_EVENT.getTexid(), 0, 0, 1024, 1024, 0, dy,
+					size / 1024.0f);
+		}
+	}
+
+	/**
+	 * 現在位置に合わせて位置を調整してマップ画像を描画する
+	 * 
+	 * @param centerLat
+	 *            画面中心セルの踏破セル緯度座標（緯度ではない）
+	 * @param centerLat
+	 *            画面中心セルの踏破セル経度座標（経度ではない）
+	 */
+	final static float[] mapBorderColor = GameColor.RED;
+
+	void drawMapNowLocate(MapData map, int buffer,
+			double centerLat, double centerLot) {
+		if (buffer == -1) {
+			return;
+		}
+
+		// 与えられたマップの左上セル番号を取得
+		// 右下方向に少しずらしているのは左端だと微妙にずれる可能性があるため
+		double[] mapLuCoord = map.getUpperleftCoordinates();
+		int[] mapLuCell = MapData.coordinatesToCell(mapLuCoord[0] - 0.002,
+				mapLuCoord[1] + 0.002);
+
+		// どれだけずらすか計算
+		float dx = (float) ((mapLuCell[1] - centerLot) * nowCellPixelSize);
+		float dy = (float) ((mapLuCell[0] - centerLat) * nowCellPixelSize);
+
+		// 描画
+		draw.drawTextureScaling(buffer, 0, 0, mapWidth, mapHeight,
+				centerCellDestX + dx, centerCellDestY + dy, mapDrawScale);
+
+		// 枠を表示
+		draw.drawBoxLine(centerCellDestX + dx, centerCellDestY + dy, mapWidth
+				* mapDrawScale, mapHeight * mapDrawScale, mapBorderColor, 2.0f);
+		
+	}
+
+	
+	/// 入力処理 /////////////////////////////////////////////////////////////
+	/**
+	 * タッチに関する更新処理
+	 */
+	void updateTouchValue() {
+		touchNum = Math.min(input.fingerNum(), maxTouchNum);
+
+		try {
+			int i = 0;
+			for (; i < touchNum; ++i) {
+				lastTouchPos[i][0] = nowTouchPos[i][0];
+				lastTouchPos[i][1] = nowTouchPos[i][1];
+				int fingerid = input.getFingerId(i);
+				nowTouchPos[i][0] = input.getFingerX(fingerid);
+				nowTouchPos[i][1] = input.getFingerY(fingerid);
+			}
+			for (; i < maxTouchNum; ++i) {
+				lastTouchPos[i][0] = nowTouchPos[i][0];
+				lastTouchPos[i][1] = nowTouchPos[i][1];
+				nowTouchPos[i][0] = -1;
+				nowTouchPos[i][1] = -1;
+			}
+
+		} catch (IndexOutOfBoundsException e) {
+			// pass
+		}
+	}
+
+	boolean isTouch() {
+		return touchNum > 0 && nowTouchPos[0][0] != -1
+				&& nowTouchPos[0][1] != -1 && lastTouchPos[0][0] == -1
+				&& lastTouchPos[0][1] == -1;
+	}
+
+	/**
+	 * マップ画面をスクロールする
+	 */
+	void scroll() {
+		lastPos[0] = centerCell[0];
+		lastPos[1] = centerCell[1];
+
+		// フラグが立っていれば現在の位置をGPS座標にする
+		if (centerNowLocate || (centerCell[0] == -1 && centerCell[1] == -1)) {
+			viewCenterCell[0] = centerCell[0] = gpsCell[0];
+			viewCenterCell[1] = centerCell[1] = gpsCell[1];
+		}
+
+		// スクロール検知
+		if (!isScroll && nowTouchPos[0][0] != -1 && nowTouchPos[0][1] != -1
+				&& lastTouchPos[0][0] == -1 && lastTouchPos[0][1] == -1) {
+			isScroll = true;
+			centerNowLocate = false;
+
+			beginningTouchPos[0] = nowTouchPos[0][0];
+			beginningTouchPos[1] = nowTouchPos[0][1];
+		}
+
+		if (isScroll) {
+			if (nowTouchPos[0][0] == -1 && nowTouchPos[0][1] == -1) {
+				isScroll = false;
+
+				// タッチ座標は(x, y)でセル座標は(y, x)なので入れ替える
+				centerCell[0] -= Math.round(scrollMount[1]);
+				centerCell[1] -= Math.round(scrollMount[0]);
+
+				scrollMount[0] = 0;
+				scrollMount[1] = 0;
+				beginningTouchPos[0] = -1;
+				beginningTouchPos[1] = -1;
+			} else {
+				// スクロール量調整
+				scrollMount[0] = (nowTouchPos[0][0] - beginningTouchPos[0])
+						/ cellPixelSize;
+				scrollMount[1] = (nowTouchPos[0][1] - beginningTouchPos[1])
+						/ cellPixelSize;
+
+				// タッチ座標は(x, y)でセル座標は(y, x)なので入れ替える
+				viewCenterCell[0] = centerCell[0] - scrollMount[1];
+				viewCenterCell[1] = centerCell[1] - scrollMount[0];
+			}
+		}
+		// 表示位置の調整はメインループで行う
+	}
+
+	/**
+	 * スケールの変更が無いかチェック、変更があれば計算する
+	 * @return スケールの変更があったかどうか
+	 */
+	boolean checkScale() {
+		// 前のフレームからタッチ数が２つない場合はスキップ
+		if (touchNum < 2 || (lastTouchPos[1][0] == -1))
+			return false;
+
+		double nSqdist = Math.sqrt((nowTouchPos[1][0] - nowTouchPos[0][0])
+				* (nowTouchPos[1][0] - nowTouchPos[0][0])
+				+ (nowTouchPos[1][1] - nowTouchPos[0][1])
+				* (nowTouchPos[1][1] - nowTouchPos[0][1]));
+		double lSqdist = Math.sqrt((lastTouchPos[1][0] - lastTouchPos[0][0])
+				* (lastTouchPos[1][0] - lastTouchPos[0][0])
+				+ (lastTouchPos[1][1] - lastTouchPos[0][1])
+				* (lastTouchPos[1][1] - lastTouchPos[0][1]));
+
+		// float newScale = Math.max(0.0f, Math.min(maxScaleCount,
+		// (float)(scaleCount + (nSqdist-lSqdist)/cellPixelSize*0.25)));
+		// if((int)(newScale*10%10) != (int)(scaleCount*10%10))
+		// sound.playBgm(R.raw.click);
+		// scaleCount = newScale;
+		scaleCount = Math.max(0.0f, Math.min(maxScaleCount,
+				(float) (scaleCount + (nSqdist - lSqdist) / cellPixelSize
+						* 0.40)));
+		// Logger.logDebug(debugtag, "nSqdist = " + nSqdist + ", lSqdist = " +
+		// lSqdist);
+		setMapDrawScale();
+
+		return true;
+	}
+
+	/**
+	 * マップの拡大率を計算する
+	 */
+	void setMapDrawScale() {
+		mapDrawScale = calcDrawScale(cellSize, VirticalCellNum, scaleCount);
+		nowCellPixelSize = (int) (cellSize * mapDrawScale);
+		int d = (int) (nowCellPixelSize / 2);
+		centerCellDestX = draw.getWidth() / 2 - d;
+		centerCellDestY = draw.getHeight() / 2 - d;
+	}
+
+	/**
+	 * 現在のマップの描画拡大率を取得する
+	 * @return テクスチャサイズに対する拡大率
+	 */
+	public float getMapDrawScale() {
+		return mapDrawScale;
+	}
+	
+	/// イベント・インテント再生 ///////////////////////////////////////////
+	/**
+	 * 再生するイベントIDを設定する
+	 * 
+	 * @param id
+	 */
+	public void setReplayEvent(int id) {
+		replayEvent = id;
+	}
+
+	/**
+	 * 再生するイベントを種類で設定する
+	 * 
+	 * @param type
+	 */
+	public void setReplayEventType(int type) {
+		replayEventType = type;
+	}
+
+	/**
+	 * Intent を受け取って再生する
+	 * @param intent 次に表示するインテント
+	 */
+	public void startActivity(Intent intent) {
+		((Activity) system.getContext()).startActivity(intent);
+	}
+
+	/**
+	 * 次に表示する GameView を設定する
+	 * @param next　次に表示するゲームビュー
+	 */
+	public void nextGameView(GameView next) {
+		system.setGameView(next);
+	}
+
+	/**
+	 * マップ画面からタイトルに戻る
+	 */
+	public void returnTitle() {
+		// captureViewSurface();
+		tabMenu.closeMenu(this);
+		replayEvent = -2;
+		nextScene = new BackGameView(new TitleView(this, updateThread));
+	}
+
+	
+	/// その他 //////////////////////////////////////////////////////
+	/**
+	 * ネットワークの接続状況を調べる
+	 * 
+	 * @return
+	 */
+	static public boolean isConnected() {
+		// 本当は Application Contextを使うべき？問題があれば後で書き換える。
+		Context context = system.getContext();
+		ConnectivityManager cm = (ConnectivityManager) context
+				.getSystemService(Context.CONNECTIVITY_SERVICE);
+		NetworkInfo ni = cm.getActiveNetworkInfo();
+		if (ni != null) {
+			return cm.getActiveNetworkInfo().isConnected();
+		}
+		return false;
+	}
+
+	/**
+	 * 中心位置を設定する
+	 * 
+	 * @param cellx
+	 * @param celly
+	 */
+	public void setCenterPositione(int cellx, int celly) {
+		centerCell[1] = cellx;
+		centerCell[0] = celly;
+		centerNowLocate = false;
+	}
+
+	/**
+	 * 現在表示するピンの座標を設定する
+	 * @param cellx
+	 * @param celly
+	 */
+	public void setPinPos(int cellx, int celly) {
+		pinPos[1] = cellx;
+		pinPos[0] = celly;
+	}
+
+
+	public void setUpdateSpeed(int speed) {
+		// 実行中に呼び出すとそれ以降の更新がなくなってしまうので呼ばない。
+		// info.requestUpdate(speed, 0);
+		updateThread.TIMEA = speed;
+	}
+
+	/**
+	 * 効果音を再生する
+	 * @param id Rに定義された効果音ファイルのID
+	 */
+	public void playSound(int id) {
+		sound.playBgm(id);
+	}
+
+	/**
+	 * マップに地形情報を表示するか設定する。
+	 * @param flag trueで地形情報を表示する
+	 */
+	public void setMapLabel(int flag) {
+		mapManager.setDrawRandmarkName(flag);
+	}
+
+	/// スクリーンショット作成関係のメソッド ////////////////////////////////////////////
+	
+	/**
+	 * 19 番テクスチャに現在のビューの描画を表示
+	 */
+	static boolean captureViewSurface() {
+		boolean ret = false;
+		
+		try {
+			Bitmap view = createBitmapFromGLSurface(0, 0, draw.getWidth(),
+					draw.getHeight(), draw.getGL10());
+			if (view != null)
+				ret = (draw.createTexture(19, view) >= 0);
+			Logger.logError(debugtag + "_capture", "capture view");
+		} catch (OutOfMemoryError e) {
+			Logger.logError(debugtag + "_capture", "", e);
+			draw.destroyTexture(19);
+		}
+		return ret;
+	}
+
+	/**
+	 * GLSurfaceから描画したビューをBitmapで取得 ここからコピペ =>
+	 * http://stackoverflow.com/questions
+	 * /5514149/capture-screen-of-glsurfaceview-to-bitmap
+	 * 
+	 * @param x
+	 * @param y
+	 * @param w
+	 * @param h
+	 * @param gl
+	 * @return
+	 * @throws OutOfMemoryError
+	 */
+	private static Bitmap createBitmapFromGLSurface(int x, int y, int w, int h,
+			GL10 gl) throws OutOfMemoryError {
+		int bitmapBuffer[] = new int[w * h];
+		int bitmapSource[] = new int[w * h];
+		IntBuffer intBuffer = IntBuffer.wrap(bitmapBuffer);
+		intBuffer.position(0);
+
+		try {
+			gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE,
+					intBuffer);
+			int offset1, offset2;
+			for (int i = 0; i < h; i++) {
+				offset1 = i * w;
+				offset2 = (h - i - 1) * w;
+				for (int j = 0; j < w; j++) {
+					int texturePixel = bitmapBuffer[offset1 + j];
+					int blue = (texturePixel >> 16) & 0xff;
+					int red = (texturePixel << 16) & 0x00ff0000;
+					int pixel = (texturePixel & 0xff00ff00) | red | blue;
+					bitmapSource[offset2 + j] = pixel;
+				}
+			}
+		} catch (GLException e) {
+			return null;
+		}
+
+		return Bitmap.createBitmap(bitmapSource, w, h, Bitmap.Config.ARGB_8888);
+	}
+}

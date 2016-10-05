@@ -1,0 +1,340 @@
+package org.x68uec.hacku.meikyu;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+
+import net.azulite.Amanatsu.*;
+
+import org.x68uec.hacku.worldlabyrinth.MapEvent;
+import org.x68uec.hacku.makeevent.EventType;
+import org.x68uec.hacku.meiqdb.MeiQDB;
+
+import android.util.Log;
+
+class Event extends GameView {
+	// フォント番号
+	protected static final int	F_HEAD		= 0, F_MESS = 1;
+	// フォントサイズ
+	protected static final int	FS_HEAD		= 30, FS_MESS = 50;
+	// テキスチャ番号
+	protected static final int	T_CHARA		= 0, T_ENEMY = 1, T_WEAPON = 2;
+	// 謎変数　不要なら消す
+	// protected static final int rate = 100;
+	// テキスチャ描画用スケール
+	private static float				scale;
+
+	// メッセージ変数
+	// 文字送りの間隔
+	public static int						mesMaxInter;
+	private static int					mesInter, mesShowLength;
+	// 文字送りの完了しているか否か
+	private static boolean			mesEnd;
+	// 枠の太さ
+	protected static final int	mesThick	= 10;
+	// 表示域のxywh
+	protected static final int	mesX			= 50 + mesThick;
+	protected static final int	mesW			= draw.getWidth() - (mesX + mesThick)
+																						* 2;
+
+	// 表示時間管理変数
+	protected EventType					type;
+	protected int								timer;
+
+	// protected int eventID;
+	// protected int playerHp, playerAttack; // プレイヤーの体力・攻撃力
+
+	// public int getPlayerHp() {
+	// return this.playerHp;
+	// }
+	//
+	// public void setPlayerHp(int shp) {
+	// this.playerHp = shp;
+	// }
+	//
+	// public int getPlayerAttack() {
+	// return this.playerAttack;
+	// }
+
+	public Event(int id, int hp, int at) {
+		// this.eventID = id;
+		this.type = EventType.getType(id);
+		// this.playerHp = hp;
+		// this.playerAttack = at;
+		// this.rate = 100;
+	}
+
+	public Event(EventType ty) {
+		this.type = ty;
+		// this.rate = 100;
+	}
+
+	@ Override
+	public void UserInit() {
+		// Prepare game.
+		draw.createFont(F_HEAD, "misaki_gothic.ttf", FS_HEAD, false, 256.0f,
+				256.0f, 256.0f, 256.0f);
+		draw.createFont(F_MESS, F_MESS); // 消しちゃ駄目　理由は不明　取り敢えず
+		draw.createFont(F_MESS, "misaki_gothic.ttf", FS_MESS, true, 256.0f, 256.0f,
+				256.0f, 256.0f);
+
+		draw.createTexture(T_CHARA, "chara.png");
+		draw.createTexture(T_ENEMY, "enemy.png");
+		draw.createTexture(T_WEAPON, "weapon.png");
+
+		scale = draw.getWidth() / 640.0f;
+
+		mesInter = mesMaxInter;
+		mesShowLength = 0;
+		mesEnd = false;
+		// 最大表示時間
+		timer = 200;
+	}
+
+	@ Override
+	public boolean MainLoop() {
+		// Game main routine.
+		draw.clearScreen();
+		return true; // false is Game end.
+	}
+
+	@ Override
+	public void CleanUp() {}
+
+	protected int damage(int hp, int at) {
+		return hp - at;
+	}
+
+	// 画面上部のメッセージ
+	protected void drawHeader(String str, int enemyHP, int enemyAT) {
+		// @formatter:off
+		draw.printf(F_HEAD, 0, 0,
+				String.format("[%02d]%s(H%d, A%d): %s <%03d>", type.getID(), type.getName(),
+						enemyHP, enemyAT, str, timer));
+		// @formatter:on
+	}
+
+	protected void drawMessage(String str) {
+		int t = mesThick, x = mesX, w = mesW;
+		int y = draw.getHeight() * 6 / 8, h = draw.getHeight() - y - t * 2;
+
+		draw.drawBox(x - t, y - t, w + t * 2, h + t * 2, GameColor.WHITE);
+		draw.drawBox(x, y, w, h, GameColor.BLACK);
+
+		// 文字送りが完了している場合
+		if (mesEnd = (mesShowLength >= str.length())) {
+			--timer;
+		// 文字送りが完了していない場合
+		} else {
+			// 文字送りの制御
+			if (mesInter-- <= 0) {
+				// 間隔の初期化
+				mesInter = mesMaxInter;
+				// 長さの増加（次が改行文字だった場合はもう1つ増加）
+				char target = str.charAt(++mesShowLength - 1);
+				if (target == '\n' || target == '　') ++mesShowLength;
+			}
+		}
+
+		// 表示する長さは文字送りの状況によって変化
+		drawMessage(x + t, y + t, str.substring(0, mesShowLength));
+	}
+
+	protected void drawMessage(int x, int y, String str) {
+		// 改行文字毎に文字列を分割した物をそれぞれ表示する
+		y -= FS_MESS;
+		for (String s: str.split("\n"))
+			draw.printf(F_MESS, x, (y += FS_MESS), s);
+	}
+
+	// // 画面下部のメッセージ
+	// protected void drawMessage( String str0, String
+	// str1, String str2, String str3, String str4, String str5, String str6,
+	// String str7, String str8) { // 柿原さん直伝のマジックナンバー final float x = 32; final
+	// float x = 32, y = draw.getHeight() * 6.0f / 8.0f;
+	//
+	// draw.printf(F_MESS, x, y + FS_MESS * 0, str0); draw.printf(F_MESS, x, y +
+	// FS_MESS * 1, str1); draw.printf(F_MESS, x, y + FS_MESS * 2, str2);
+	// draw.printf(F_MESS, x, y + FS_MESS * 3, str3); draw.printf(F_MESS, x, y +
+	// FS_MESS * 4, str4); draw.printf(F_MESS, x, y + FS_MESS * 5, str5);
+	// draw.printf(F_MESS, x, y + FS_MESS * 6, str6); draw.printf(F_MESS, x, y +
+	// FS_MESS * 7, str7); draw.printf(F_MESS, x, y + FS_MESS * 8, str8); }
+	//
+	// protected void drawMessage(String str0, String str1, String str2,
+	// String str3, String str4, String str5, String str6, String str7) {
+	// drawMessage(str0, str1, str2, str3, str4, str5, str6, str7, "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1, String str2,
+	// String str3, String str4, String str5, String str6) {
+	// drawMessage(str0, str1, str2, str3, str4, str5, str6, "", "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1, String str2,
+	// String str3, String str4, String str5) {
+	// drawMessage(str0, str1, str2, str3, str4, str5, "", "", "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1, String str2,
+	// String str3, String str4) {
+	// drawMessage(str0, str1, str2, str3, str4, "", "", "", "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1, String str2, String
+	// str3) {
+	// drawMessage(str0, str1, str2, str3, "", "", "", "", "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1, String str2) {
+	// drawMessage(str0, str1, str2, "", "", "", "", "", "");
+	// }
+	//
+	// protected void drawMessage(String str0, String str1) {
+	// drawMessage(str0, str1, "", "", "", "", "", "", "");
+	// }
+	//
+	// protected void drawMessage(String str0) {
+	// drawMessage(str0, "", "", "", "", "", "", "", "");
+	// }
+
+	// イベント中のキャラクターの描画
+	protected void drawChara(boolean playerAlive, boolean enemyAlive) {
+		// 倒れた際の傾き度合い
+		final float down = 1.0f;
+
+		// 自分
+		draw.drawTextureScaleRotateC(T_CHARA,
+				16.0f * MeiQDB.self().getCharaImage(), 0.0f, 16.0f, 16.0f,
+				draw.getWidth() * 6.0f / 8.0f, draw.getHeight() * 4.0f / 8.0f + scale
+						* 16.0f, scale * 8.0f, (playerAlive? 0.0f: down), 0);
+
+		// 装備
+		int weaponType = 0; // これは外部取得
+		draw.drawTextureScaleRotateC(T_WEAPON, 16.0f * weaponType, 0.0f, 16.0f,
+				16.0f, draw.getWidth() * 6.0f / 8.0f - scale * 72.0f, draw.getHeight()
+						* 4.0f / 8.0f - scale * 16.0f + scale * 16.0f, scale * 8.0f,
+				(playerAlive? 0.0f: down), 0);
+
+		// 相手
+		draw.drawTextureScaleRotateC(T_ENEMY, type.getDrawX(), type.getDrawY(),
+				EventType.drawSize, EventType.drawSize, draw.getWidth() * 2.0f / 8.0f,
+				draw.getHeight() * 3.0f / 8.0f, scale * 16.0f,
+				(enemyAlive? 0.0f: -1.0f), 1); // 最後が1で左右反転
+	}
+
+	protected boolean isTouch() {
+		return input.getTouchFrame() % 10 == 1;
+	}
+
+	// 画面を終了するか
+	protected boolean isExit() {
+		if (mesEnd && (timer < 0 || isTouch())) return false;
+		return true;
+	}
+}
+
+public class EventList extends GameView {
+	private ArrayList<Event>	eventlist;
+	private EventType					type;
+	private int								playerHP, playerAttack, enemyHP, enemyAttack,
+			mesInter;
+	// , eventID;
+	// 生成時：最後の追加された要素、実行時：現在実行されている要素
+	private Event							event;
+	private Iterator<Event>		it;
+
+	// プレイヤー体力・攻撃力、エネミー体力・攻撃力、イベントID
+	public EventList(int eventID, int PlayreHP, int PlayerAttack, int EnemyHp,
+			int EnemyAttack, int messageInterval) {
+		type = EventType.getType(eventID);
+		playerHP = PlayreHP;
+		playerAttack = PlayerAttack;
+		enemyHP = EnemyHp;
+		enemyAttack = EnemyAttack;
+		mesInter = messageInterval;
+
+		// eventID = eId;
+		// event = new Attack(pHp, pAt, eHp, eAt, eTy);
+	}
+
+	public void UserInit() {
+		// EventType type = EventType.getType(eventID);
+		eventlist = new ArrayList<Event>();
+		if (type.isEnemy()) {
+			// 遭遇場面の追加
+			event = new Battle(type, Battle.ENCOUNTER, playerHP, playerAttack,
+					enemyHP, enemyAttack);
+			eventlist.add(event);
+			// 最初の攻撃の追加
+			event = new Battle(type, Battle.ATTACK, playerHP, playerAttack, enemyHP,
+					enemyAttack);
+			eventlist.add(event);
+
+			while (true) {
+				// 敵にダメージ
+				if (((Battle)event).isAttack()) {
+					// ダメージ
+					enemyHP -= playerAttack;
+					// 継続判定
+					if (enemyHP <= 0) break;
+
+					// 続く場合は次のDefenceイベントを追加する
+					event = new Battle(type, Battle.DEFENCE, playerHP, playerAttack,
+							enemyHP, enemyAttack);
+					eventlist.add(event);
+
+					// 自分にダメージ
+				} else {
+					// ダメージ
+					playerHP -= enemyAttack;
+					// 継続判定
+					if (playerHP <= 0) break;
+
+					// 続く場合は次のAttackイベントを追加する
+					event = new Battle(type, Battle.ATTACK, playerHP, playerAttack,
+							enemyHP, enemyAttack);
+					eventlist.add(event);
+				}
+			}
+		} else {
+			event = (type == EventType.TALK? new Talk(type): new Item(type));
+			// event = (type.isEnemy()? new Attack(eventID, playerHP, playerAttack,
+			// enemyHP, enemyAttack): new Talk(eventID, playerHP, playerAttack));
+			this.eventlist.add(event);
+		}
+
+		// 最後に結果画面を追加（成否判断：プレイヤーの体力）
+		event = new Result(type, playerHP > 0);
+		// event = new Result(eventID, playerHP, enemyAttack);
+		this.eventlist.add(event);
+
+		// 先頭のイテレータを取得し、最初のイベントの準備をする
+		it = eventlist.iterator();
+		event = it.next();
+		event.UserInit();
+
+		// 文字送りの間隔を設定する
+		Event.mesMaxInter = mesInter;
+	}
+
+	public boolean MainLoop() {
+		// 画面初期化。
+		draw.clearScreen(GameColor.BLUE);
+
+		if (!event.MainLoop()) {
+			event.CleanUp();
+
+			// ループを抜けるのは次のイベントが無い場合のみ
+			if (!it.hasNext()) {
+				system.setGameView(new MapEvent());
+				return true;
+			}
+
+			event = it.next();
+			event.UserInit();
+		}
+		// 全イベント完了以外にMainLoopが終わった場合、次のイベント再生のためにループさせる
+		return true;
+	}
+
+	public void CleanUp() {}
+}

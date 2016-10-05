@@ -1,0 +1,23 @@
+{
+  "C:\\Program Files\\Java\\jre7\\lib\\rt.jar": {
+    "coordinate": "jre:jre:zip:call:1.0.0",
+    "location": "C:\\Program Files\\Java\\jre7\\lib\\rt.jar",
+    "status": "RESOLVED",
+    "error": "No class path info available for \u0027C:\\Program Files\\Java\\jre7\\lib\\rt.jar\u0027. Skipped."
+  },
+  "C:\\Users\\mako\\University\\Third\\Experimentation\\1-4\\formprinter\\src": {
+    "location": "C:\\Users\\mako\\University\\Third\\Experimentation\\1-4\\formprinter\\src",
+    "status": "UNRESOLVED",
+    "error": "No class path info available for \u0027C:\\Users\\mako\\University\\Third\\Experimentation\\1-4\\formprinter\\src\u0027. Skipped."
+  },
+  "C:\\Users\\mako\\formprinter\\src": {
+    "location": "C:\\Users\\mako\\formprinter\\src",
+    "status": "UNRESOLVED",
+    "error": "No class path info available for \u0027C:\\Users\\mako\\formprinter\\src\u0027. Skipped."
+  },
+  "C:\\Users\\mako\\Eclipse4.2\\WorkSpace\\GameLibrary\\src": {
+    "location": "C:\\Users\\mako\\Eclipse4.2\\WorkSpace\\GameLibrary\\src",
+    "status": "UNRESOLVED",
+    "error": "No class path info available for \u0027C:\\Users\\mako\\Eclipse4.2\\WorkSpace\\GameLibrary\\src\u0027. Skipped."
+  }
+}

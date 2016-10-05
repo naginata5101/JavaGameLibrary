@@ -1,0 +1,56 @@
+package org.x68uec.hacku.meikyu;
+
+public class Item extends Event {
+	public Item(int id, int hp, int at) {
+		super(id, hp, at);
+	}
+
+	@ Override
+	public void UserInit() {
+
+		draw.createTexture(1, "chara.png");
+	}
+
+	@ Override
+	public boolean MainLoop() {
+		// 画面初期化。
+		draw.clearScreen();
+
+		int timer = 120;
+		float scale = draw.getWidth() / 640.0f;
+		int i, j, k;
+		i = j = k = 0;
+
+		while (true) {
+			// FPSの表示。
+			draw.createFont(0, 30);
+			draw.printf(0, 0, 0, "FPS : " + draw.getFps() + "  by Talk");
+
+			draw.drawTextureScaleRotateC(1, 16.0f * k, 0.0f, 16.0f, 16.0f,
+					draw.getWidth() * 5.0f / 16.0f, 128.0f * scale, scale * 4.0f, 0.0f, 1); // アイテム
+			draw.drawTextureScaleRotateC(1, 16.0f * k, 0.0f, 16.0f, 16.0f,
+					draw.getWidth() * 12.0f / 16.0f, 128.0f * scale, scale * 8.0f, 0.0f,
+					0); // 自分
+
+			// ( 1, rx, ry, w, h, dx, dy, scale, rad, flag)
+
+			draw.createFont(0, 50);
+			draw.printf(0, 32, draw.getHeight() * 6.0f / 8.0f, "あいてむをてにいれた。やったね。");
+
+			--timer;
+
+			if (timer < 0) {
+				return false;
+			}
+
+			if (input.getTouchFrame() >= 1) {
+				return false;
+			}
+
+		}
+
+	}
+
+	@ Override
+	public void CleanUp() {}
+}
